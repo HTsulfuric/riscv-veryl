@@ -1,0 +1,68 @@
+/// Minimal machine-mode CSR file.
+/// Implements mtvec, mscratch, mcause, mepc and reports the read-only
+/// mvendorid / misa / mhartid group as zero. Everything else reads as
+/// zero and ignores writes.
+/// The EX stage drives the read port combinationally (rs1 or the
+/// immediate is written, old value is returned) and the trap entry
+/// logic writes mcause / mepc directly.
+module rv32i_csr (
+    i_clk      : input clock       ,
+    i_rst      : input reset       ,
+    // EX stage CSR access (write strobe comes with a valid instruction)
+    i_we       : input logic       ,
+    i_addr     : input logic<12>   ,
+    i_wdata    : input logic<32>   , // new value (rs1 or zimm)
+    o_rdata    : output logic<32>  , // old value
+    // trap entry (from EX stage, one cycle)
+    i_trap     : input logic       ,
+    i_trap_cause: input logic<32>  ,
+    i_trap_epc : input logic<32>   ,
+    o_mtvec    : output logic<32>  ,
+    o_mepc     : output logic<32>  ,
+) {
+    var mtvec   : logic<32>;
+    var mscratch: logic<32>;
+    var mcause  : logic<32>;
+    var mepc    : logic<32>;
+
+    always_comb {
+        o_rdata = case i_addr {
+            12'h305: mtvec,
+            12'h340: mscratch,
+            12'h342: mcause,
+            12'h341: mepc,
+            12'hF11: 32'h0, // mvendorid   (not implemented)
+            12'h301: 32'h0, // misa        (reported as 0)
+            12'h14E: 32'h0, // mhartid
+            default: 32'h0,
+        };
+    }
+
+    assign o_mtvec = mtvec;
+    assign o_mepc = mepc;
+
+    always_ff {
+        if_reset {
+            mtvec    = 32'h4;
+            mscratch = 32'h0;
+            mcause   = 32'h0;
+            mepc     = 32'h0;
+        } else {
+            if i_trap {
+                mcause = i_trap_cause;
+                mepc   = i_trap_epc;
+            }
+            if i_we {
+                case i_addr {
+                    12'h305: mtvec   = i_wdata & 32'hffff_fffc;
+                    12'h340: mscratch = i_wdata;
+                    12'h342: mcause   = i_wdata;
+                    12'h341: mepc     = i_wdata;
+                    default: {
+                        // read-only / unimplemented: ignore
+                    }
+                }
+            }
+        }
+    }
+}

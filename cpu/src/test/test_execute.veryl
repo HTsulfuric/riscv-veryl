@@ -1,0 +1,236 @@
+/// Unit test: rv32i_execute
+/// One scenario per selector value: ALU operand muxing, every branch
+/// condition (signed/unsigned), jump targets incl. the JALR LSB mask,
+/// CSR read-modify-write forms, write-back muxing and trap signals.
+#[allow(unused_variable)]
+#[test(test_execute)]
+module test_execute {
+    #[allow(initial_assign)]
+    var sel: logic<5>;
+    var csr_rdata: logic<32>;
+    var mepc: logic<32>;
+    var mtvec: logic<32>;
+
+    var idex: riscv_pkg::IdEx;
+
+    var csr_we: logic;
+    var csr_addr: logic<12>;
+    var csr_wdata: logic<32>;
+    var redirect: logic;
+    var redirect_pc: logic<32>;
+    var trap: logic;
+    var trap_cause: logic<32>;
+    var trap_epc: logic<32>;
+    var alu: logic<32>;
+    var wbvalue: logic<32>;
+
+    always_comb {
+        // scenario defaults: a plain valid ALU add r1 = r2 + r3
+        idex.pc       = 32'h0000_0040;
+        idex.imm      = 32'h0;
+        idex.rs1_data = 32'h0000_0005;
+        idex.rs2_data = 32'h0000_0009;
+        idex.csr_src  = 32'h0;
+        idex.insn     = 32'h00000000;
+        idex.rd       = 5'd1;
+        idex.ctrl     = riscv_pkg::CTRL_NOP;
+        idex.ctrl.valid    = 1;
+        idex.ctrl.regwrite = 1;
+        idex.ctrl.aluop    = riscv_pkg::AluOp::ADD;
+
+        case sel {
+            // immediate operand (ADDI): 5 + 7
+            5'd1: { idex.ctrl.alu_src = 1; idex.imm = 7; }
+            // BEQ taken: a == b -> pc + imm
+            5'd2: {
+                idex.ctrl.branch = 1; idex.insn = 32'h00000063;
+                idex.rs2_data = 5; idex.imm = 32'h10;
+            }
+            // BEQ not taken
+            5'd3: {
+                idex.ctrl.branch = 1; idex.insn = 32'h00000063;
+                idex.rs2_data = 8; idex.imm = 32'h10;
+            }
+            // BNE taken when unequal
+            5'd4: {
+                idex.ctrl.branch = 1; idex.insn = 32'h00001063;
+                idex.rs2_data = 9; idex.imm = 32'h10;
+            }
+            // BLT signed: -1 < 1 -> taken; same for BGE (must not take)
+            5'd5: {
+                idex.ctrl.branch = 1; idex.insn = 32'h00004063;
+                idex.rs1_data = 32'hffff_ffff; idex.rs2_data = 1;
+                idex.imm = 32'h10;
+            }
+            5'd6: {
+                idex.ctrl.branch = 1; idex.insn = 32'h00005063;
+                idex.rs1_data = 32'hffff_ffff; idex.rs2_data = 1;
+                idex.imm = 32'h10;
+            }
+            // BLTU: 0xffff_ffff <u 1 -> not taken; BGEU -> taken
+            5'd7: {
+                idex.ctrl.branch = 1; idex.insn = 32'h00006063;
+                idex.rs1_data = 32'hffff_ffff; idex.rs2_data = 1;
+                idex.imm = 32'h10;
+            }
+            5'd8: {
+                idex.ctrl.branch = 1; idex.insn = 32'h00007063;
+                idex.rs1_data = 32'hffff_ffff; idex.rs2_data = 1;
+                idex.imm = 32'h10;
+            }
+            // JAL: target pc+imm, link pc+4
+            5'd9: {
+                idex.ctrl.jump = 1; idex.ctrl.wb_sel = riscv_pkg::WbSel::PC4;
+                idex.pc = 32'h100; idex.imm = 32'h20;
+                idex.insn = 32'h0000006f;
+            }
+            // JALR: target (rs1+imm) & ~1, link pc+4
+            5'd10: {
+                idex.ctrl.jump = 1; idex.ctrl.alu_src = 1;
+                idex.ctrl.wb_sel = riscv_pkg::WbSel::PC4;
+                idex.rs1_data = 32'h43; idex.imm = 0;
+                idex.insn = 32'h00000067;
+            }
+            // CSRRW: write rs1, return old value
+            5'd11: {
+                idex.ctrl.csr_en = 1;
+                idex.csr_src = 32'h55;
+                idex.insn = 32'h3400_1073; // funct3=001
+            }
+            // CSRRS: set bits
+            5'd12: {
+                idex.ctrl.csr_en = 1;
+                idex.csr_src = 32'h0000_0100;
+                idex.insn = 32'h3400_2073; // funct3=010
+            }
+            // CSRRC: clear bits
+            5'd13: {
+                idex.ctrl.csr_en = 1;
+                idex.csr_src = 32'h0000_000f;
+                idex.insn = 32'h3400_3073; // funct3=011
+            }
+            // illegal instruction traps to mtvec with cause 2
+            5'd14: {
+                idex.ctrl.regwrite = 0; idex.ctrl.illegal = 1;
+                idex.pc = 32'h24;
+            }
+            // ebreak traps with cause 3
+            5'd15: {
+                idex.ctrl.regwrite = 0; idex.ctrl.ebreak = 1;
+                idex.pc = 32'h28;
+            }
+            // MRET: redirect to mepc but no trap entry
+            5'd16: {
+                idex.ctrl.regwrite = 1; idex.ctrl.mret = 1;
+                idex.ctrl.wb_sel = riscv_pkg::WbSel::PC;
+            }
+            // store address = rs1 + imm regardless of stored data
+            5'd17: {
+                idex.ctrl.regwrite = 0; idex.ctrl.mem_write = 1;
+                idex.ctrl.alu_src = 1;
+                idex.rs1_data = 32'h6c; idex.imm = 32'ha;
+                idex.rs2_data = 32'habcd;
+            }
+            // AUIPC: alu sees pc instead of rs1
+            5'd18: {
+                idex.ctrl.pc_src = 1; idex.ctrl.alu_src = 1;
+                idex.pc = 32'h58; idex.imm = 32'h1000;
+            }
+            // LUI: PASS forwards the immediate
+            5'd19: {
+                idex.ctrl.aluop = riscv_pkg::AluOp::PASS;
+                idex.ctrl.alu_src = 1; idex.imm = 32'h1000;
+            }
+            // load: wb_sel MEMORY returns 0 at EX (filled in MEM)
+            5'd20: {
+                idex.ctrl.mem_read = 1;
+                idex.ctrl.wb_sel = riscv_pkg::WbSel::MEMORY;
+            }
+            // invalid (bubble) instruction: nothing fires
+            5'd21: {
+                idex.ctrl.valid = 0; idex.ctrl.regwrite = 0;
+                idex.ctrl.jump = 1; idex.ctrl.branch = 1;
+            }
+            default: {}
+        }
+    }
+
+    inst dut: rv32i_execute (
+        i_idex: idex,
+        i_csr_rdata: csr_rdata,
+        o_csr_we: csr_we, o_csr_addr: csr_addr, o_csr_wdata: csr_wdata,
+        o_redirect: redirect, o_redirect_pc: redirect_pc,
+        o_trap: trap, o_trap_cause: trap_cause, o_trap_epc: trap_epc,
+        i_mepc: mepc, i_mtvec: mtvec,
+        o_alu: alu, o_wbvalue: wbvalue,
+    );
+
+    initial {
+        csr_rdata = 32'haaaa_aaaa;   // old CSR value
+        mepc = 32'h0000_0900;
+        mtvec = 32'h0000_0080;
+
+        // scenario 0: default reg-alu add
+        sel = 0;
+        $assert(alu == 32'he && wbvalue == 32'he, "add %h", alu);
+
+        sel = 1;
+        $assert(alu == 32'hc, "addi %h", alu);
+
+        sel = 2;
+        $assert(redirect && redirect_pc == 32'h50, "beq taken %h", redirect_pc);
+        sel = 3;
+        $assert(!redirect, "beq not taken");
+
+        sel = 4;
+        $assert(redirect && redirect_pc == 32'h50, "bne taken");
+
+        sel = 5;
+        $assert(redirect, "blt taken");
+        sel = 6;
+        $assert(!redirect, "bge not taken");
+        sel = 7;
+        $assert(!redirect, "bltu not taken");
+        sel = 8;
+        $assert(redirect && redirect_pc == 32'h50, "bgeu taken");
+
+        sel = 9;
+        $assert(redirect && redirect_pc == 32'h120 && wbvalue == 32'h104,
+                "jal %h %h", redirect_pc, wbvalue);
+        sel = 10;
+        $assert(redirect && redirect_pc == 32'h42 && wbvalue == 32'h44,
+                "jalr %h %h", redirect_pc, wbvalue);
+
+        sel = 11;
+        $assert(csr_we && csr_addr == 12'h340 && csr_wdata == 32'h55 &&
+                wbvalue == 32'haaaa_aaaa, "csrrw %h %h", csr_wdata, wbvalue);
+        sel = 12;
+        $assert(csr_wdata == 32'haaaa_abaa, "csrrs %h", csr_wdata);
+        sel = 13;
+        $assert(csr_wdata == 32'haaaa_aaa0, "csrrc %h", csr_wdata);
+
+        sel = 14;
+        $assert(trap && trap_cause == 32'h2 && trap_epc == 32'h24 &&
+                redirect && redirect_pc == 32'h80, "illegal trap");
+        sel = 15;
+        $assert(trap && trap_cause == 32'h3 && trap_epc == 32'h28,
+                "ebreak trap");
+        sel = 16;
+        $assert(!trap && redirect && redirect_pc == 32'h900 &&
+                wbvalue == 32'h40, "mret %h", redirect_pc);
+
+        sel = 17;
+        $assert(alu == 32'h76, "store addr %h", alu);
+        sel = 18;
+        $assert(alu == 32'h1058, "auipc %h", alu);
+        sel = 19;
+        $assert(alu == 32'h1000, "lui %h", alu);
+        sel = 20;
+        $assert(wbvalue == 32'h0, "load wb zero at ex");
+
+        sel = 21;
+        $assert(!redirect && !trap && !csr_we, "bubble silent");
+
+        $finish();
+    }
+}

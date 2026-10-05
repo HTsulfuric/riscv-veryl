@@ -1,0 +1,28 @@
+/// Program counter with stall and redirect support.
+/// Holds the address of the instruction being fetched. The next PC is
+/// the redirect target (taken branch / jump / trap), else pc+4.
+/// `i_stall` freezes the counter so that the instruction captured in
+/// IF/ID is not skipped during a load-use stall.
+module rv32i_pc (
+    i_clk      : input clock      ,
+    i_rst      : input reset      ,
+    i_stall    : input logic      , // hold current value
+    i_redir    : input logic      , // redirect request from EX
+    i_redir_pc : input logic<32>  , // redirect target
+    o_pc       : output logic<32> , // current fetch address
+    o_pc_plus4 : output logic<32> , // pc + 4 (link value for JAL)
+) {
+    always_comb {
+        o_pc_plus4 = o_pc + 4;
+    }
+
+    always_ff {
+        if_reset {
+            o_pc = 32'h0000_0000;
+        } else if i_redir {
+            o_pc = i_redir_pc;
+        } else if !i_stall {
+            o_pc = o_pc + 4;
+        }
+    }
+}

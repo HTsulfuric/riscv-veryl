@@ -1,0 +1,126 @@
+/// Execute stage (combinational).
+/// Responsibilities:
+///  * ALU operation for arithmetic / address generation,
+///  * branch condition evaluation and next-PC (redirect) computation,
+///  * CSR read/modify/write,
+///  * trap generation (illegal instruction / EBREAK),
+///  * the write-back value mux (ALU / memory / PC+4) which is
+///    forwarded through EX/MEM to WB.
+module rv32i_execute (
+    // ID/EX pipeline register contents
+    i_idex     : input  riscv_pkg::IdEx   ,
+    // CSR interface
+    i_csr_rdata: input  logic<32>         ,
+    o_csr_we   : output logic             ,
+    o_csr_addr : output logic<12>         ,
+    o_csr_wdata: output logic<32>         ,
+    // redirect (taken branch / jump / trap)
+    o_redirect : output logic             ,
+    o_redirect_pc: output logic<32>       ,
+    // trap entry to the CSR file
+    o_trap     : output logic             ,
+    o_trap_cause: output logic<32>        ,
+    o_trap_epc : output logic<32>         ,
+    // MRET return address (mepc) supplied by the CSR file
+    i_mepc     : input  logic<32>         ,
+    // trap vector base supplied by the CSR file
+    i_mtvec    : input  logic<32>         ,
+    // results forwarded to EX/MEM
+    o_alu      : output logic<32>         , // address or ALU result
+    o_wbvalue  : output logic<32>         , // value destined for rd
+) {
+    var alu_result: logic<32>;
+    var alu_a     : logic<32>;
+    var alu_b     : logic<32>;
+
+    // AUIPC uses pc as the first operand instead of rs1
+    assign alu_a = if i_idex.ctrl.pc_src ? i_idex.pc : i_idex.rs1_data;
+
+    inst u_alu: rv32i_alu (
+        i_op    : i_idex.ctrl.aluop   ,
+        i_sra   : i_idex.ctrl.sra   ,
+        i_a     : alu_a             ,
+        i_b     : alu_b             ,
+        o_result: alu_result        ,
+        o_zero  : _                 ,
+    );
+
+    // second ALU operand: immediate or rs2. Stores compute their
+    // address as rs1 + imm; the stored value travels separately in
+    // the ExMem payload, never through the address ALU.
+    assign alu_b = if i_idex.ctrl.alu_src ? i_idex.imm : i_idex.rs2_data;
+
+    // ------------------------------------------------------------------
+    // branch condition
+    // ------------------------------------------------------------------
+    var s1: signed logic<32>;
+    var s2: signed logic<32>;
+    assign s1 = i_idex.rs1_data;
+    assign s2 = i_idex.rs2_data;
+    let cmp_eq : logic = (i_idex.rs1_data == i_idex.rs2_data);
+    let cmp_lt : logic = (s1 <: s2);
+    let cmp_ltu: logic = (i_idex.rs1_data <: i_idex.rs2_data);
+
+    let funct3: logic<3> = i_idex.insn[14:12];
+
+    var branch_taken: logic;
+    assign branch_taken = if i_idex.ctrl.branch ? case funct3 {
+        riscv_decode::BranchOp::BEQ : cmp_eq,
+        riscv_decode::BranchOp::BNE : !cmp_eq,
+        riscv_decode::BranchOp::BLT : cmp_lt,
+        riscv_decode::BranchOp::BGE : !cmp_lt,
+        riscv_decode::BranchOp::BLTU: cmp_ltu,
+        riscv_decode::BranchOp::BGEU: !cmp_ltu,
+        default     : 1'b0,
+    } : 1'b0;
+
+    // ------------------------------------------------------------------
+    // traps
+    // ------------------------------------------------------------------
+    let trap: logic = i_idex.ctrl.valid &&
+        (i_idex.ctrl.illegal || i_idex.ctrl.ebreak || i_idex.ctrl.mret);
+
+    // ------------------------------------------------------------------
+    // CSR read-modify-write
+    // ------------------------------------------------------------------
+    let csr_old: logic<32> = i_csr_rdata;
+    let csr_new: logic<32> = case funct3[1:0] {
+        2'b10: csr_old | i_idex.csr_src,  // set   (RS / SI)
+        2'b11: csr_old & ~i_idex.csr_src, // clear (RC / CI)
+        default: i_idex.csr_src,          // write (RW / RWI)
+    };
+
+    always_comb {
+        // CSR port
+        o_csr_we   = i_idex.ctrl.valid && i_idex.ctrl.csr_en;
+        o_csr_addr = i_idex.insn[31:20];
+        o_csr_wdata = csr_new;
+
+        // ALU result / memory address
+        o_alu = alu_result;
+
+        // write-back value mux
+        o_wbvalue = case i_idex.ctrl.wb_sel {
+            riscv_pkg::WbSel::MEMORY: 32'h0, // filled in by MEM stage
+            riscv_pkg::WbSel::PC4   : i_idex.pc + 4,
+            riscv_pkg::WbSel::PC    : i_idex.pc,
+            default     : if i_idex.ctrl.csr_en ? csr_old : alu_result,
+        };
+
+        // redirect
+        o_redirect = i_idex.ctrl.valid &&
+            ((i_idex.ctrl.branch && branch_taken) ||
+             i_idex.ctrl.jump || trap);
+
+        o_redirect_pc = if i_idex.ctrl.mret ? i_mepc
+            : if trap ? i_mtvec
+            : if i_idex.ctrl.jump ? (if (i_idex.insn[6:0] == riscv_pkg::Opcode::OP_JAL) ?
+                (i_idex.pc + i_idex.imm) : ((i_idex.rs1_data + i_idex.imm) & ~32'h1))
+            : (i_idex.pc + i_idex.imm);
+
+        // trap entry (MRET does not write the CSR file)
+        o_trap = i_idex.ctrl.valid && (i_idex.ctrl.illegal || i_idex.ctrl.ebreak);
+        o_trap_cause = if i_idex.ctrl.ebreak ? 32'd3 : 32'd2;
+        o_trap_epc = i_idex.pc;
+    }
+}

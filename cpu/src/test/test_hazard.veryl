@@ -1,0 +1,61 @@
+/// Unit test: rv32i_hazard
+/// Load-use detection (both source ports, x0 exclusion, invalid ID),
+/// and redirect flushing.
+#[allow(unused_variable)]
+#[test(test_hazard)]
+module test_hazard {
+    var ex_memread: logic;
+    var ex_rd: logic<5>;
+    var id_rs1: logic<5>;
+    var id_rs2: logic<5>;
+    var id_valid: logic;
+    var redirect: logic;
+    var stall_if: logic;
+    var stall_id: logic;
+    var flush_if_id: logic;
+    var flush_id_ex: logic;
+
+    inst dut: rv32i_hazard (
+        i_ex_memread: ex_memread, i_ex_rd: ex_rd,
+        i_id_rs1: id_rs1, i_id_rs2: id_rs2, i_id_valid: id_valid,
+        i_redirect: redirect,
+        o_stall_if: stall_if, o_stall_id: stall_id,
+        o_flush_if_id: flush_if_id, o_flush_id_ex: flush_id_ex,
+    );
+
+    initial {
+        // idle: no hazard, no redirect
+        ex_memread = 0; ex_rd = 0; id_rs1 = 0; id_rs2 = 0;
+        id_valid = 0; redirect = 0;
+        $assert(!stall_if && !stall_id && !flush_if_id && !flush_id_ex,
+                "idle");
+
+        // load rd=7 in EX, ID uses rs1=7 -> stall front end, bubble EX
+        ex_memread = 1; ex_rd = 7; id_valid = 1; id_rs1 = 7; id_rs2 = 0;
+        $assert(stall_if && stall_id && flush_id_ex && !flush_if_id,
+                "load-use rs1");
+
+        // same via rs2
+        id_rs1 = 0; id_rs2 = 7;
+        $assert(stall_if && flush_id_ex, "load-use rs2");
+
+        // non-matching sources -> no stall
+        id_rs1 = 8; id_rs2 = 9;
+        $assert(!stall_if && !flush_id_ex, "no match");
+
+        // a load into x0 can never create a hazard
+        ex_rd = 0; id_rs1 = 0; id_rs2 = 0;
+        $assert(!stall_if && !flush_id_ex, "x0 load");
+
+        // invalid (bubbled) ID never stalls
+        ex_rd = 7; id_rs1 = 7; id_valid = 0;
+        $assert(!stall_if && !flush_id_ex, "invalid id");
+
+        // redirect flushes IF/ID and ID/EX without any stall
+        ex_memread = 0; id_valid = 1; redirect = 1;
+        $assert(!stall_if && !stall_id && flush_if_id && flush_id_ex,
+                "redirect");
+
+        $finish();
+    }
+}

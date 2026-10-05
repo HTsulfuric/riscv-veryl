@@ -1,0 +1,74 @@
+/// Unit test: rv32i_regfile
+/// Covers reset contents, writes (incl. x0 immunity), stored reads and
+/// the same-cycle write-through bypass on both read ports.
+#[allow(unused_variable)]
+#[test(test_regfile)]
+module test_regfile {
+    inst clk: $tb::clock_gen;
+    #[allow(initial_assign)]
+    var rst: reset;
+
+    var we: logic;
+    var waddr: logic<5>;
+    var wdata: logic<32>;
+    var raddr1: logic<5>;
+    var rdata1: logic<32>;
+    var raddr2: logic<5>;
+    var rdata2: logic<32>;
+    var wt_we: logic;
+    var wt_addr: logic<5>;
+    var wt_data: logic<32>;
+
+    inst dut: rv32i_regfile (
+        i_clk: clk, i_rst: rst,
+        i_we: we, i_waddr: waddr, i_wdata: wdata,
+        i_raddr1: raddr1, o_rdata1: rdata1,
+        i_raddr2: raddr2, o_rdata2: rdata2,
+        i_wt_we: wt_we, i_wt_addr: wt_addr, i_wt_data: wt_data,
+    );
+
+    initial {
+        rst = 1;
+        we = 0; waddr = 0; wdata = 0;
+        raddr1 = 0; raddr2 = 0;
+        wt_we = 0; wt_addr = 0; wt_data = 0;
+        clk.next();
+        rst = 0;
+
+        // after reset every register reads zero
+        raddr1 = 1; raddr2 = 31;
+        $assert(rdata1 == 32'h0 && rdata2 == 32'h0, "reset contents");
+
+        // write x1 and x5, read back
+        we = 1; waddr = 1; wdata = 32'hdead_beef; clk.next();
+        we = 1; waddr = 5; wdata = 32'h0000_0012; clk.next();
+        we = 0;
+        raddr1 = 1; raddr2 = 5;
+        $assert(rdata1 == 32'hdead_beef, "x1 %h", rdata1);
+        $assert(rdata2 == 32'h12, "x5 %h", rdata2);
+
+        // writes to x0 are dropped
+        we = 1; waddr = 0; wdata = 32'hffff_ffff; clk.next();
+        we = 0;
+        raddr1 = 0;
+        $assert(rdata1 == 32'h0, "x0 hard-wired %h", rdata1);
+
+        // write-through: a WB write in progress is seen by same-cycle reads
+        wt_we = 1; wt_addr = 5; wt_data = 32'habcd_1234;
+        raddr1 = 5; raddr2 = 1;
+        $assert(rdata1 == 32'habcd_1234, "wt port1 %h", rdata1);
+        $assert(rdata2 == 32'hdead_beef, "non-matching port2 %h", rdata2);
+        // bypass of x0 writes must not fire
+        wt_addr = 0; wt_data = 32'h1;
+        raddr1 = 0;
+        $assert(rdata1 == 32'h0, "wt x0 %h", rdata1);
+        wt_we = 0;
+
+        // bypass is combinational only: the stored value stays until the
+        // register file write port commits it
+        raddr1 = 5;
+        $assert(rdata1 == 32'h12, "stored x5 %h", rdata1);
+
+        $finish();
+    }
+}

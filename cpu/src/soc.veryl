@@ -1,0 +1,116 @@
+/// Minimal SoC: RV32I core + combined instruction/data RAM.
+/// The RAM is a single word-addressed block with two combinational
+/// read ports (instruction fetch, data) and one synchronous write
+/// port (data store). Contents can be preloaded with $readmemh.
+module rv32i_soc #(
+    // RAM size in 32-bit words (4 KiB by default)
+    param WORDS    : u32 = 1024,
+    param ADDR_BITS: u32 = $clog2(WORDS),
+) (
+    i_clk         : input clock       ,
+    i_rst         : input reset       ,
+    // retired instruction trace
+    o_inst_retire : output logic      ,
+    o_retire_pc   : output logic<32>  ,
+    o_retire_rd   : output logic<5>   ,
+    o_retire_wdata: output logic<32>  ,
+    // halt flag from EBREAK
+    o_halt        : output logic      ,
+    // program image loader (simulation/test only)
+    i_load_en     : input logic       ,
+    i_load_addr   : input logic<30> ,
+    i_load_wdata  : input logic<32>   ,
+) {
+    // ------------------------------------------------------------------
+    // core <-> ram wires
+    // ------------------------------------------------------------------
+    var imem_req   : riscv_pkg::IfReq;
+    var imem_rdata : logic<32>;
+    var dmem_req   : riscv_pkg::MemReq;
+    var dmem_rdata : logic<32>;
+
+    inst u_core: rv32i_core (
+        i_clk, i_rst,
+        o_imem_req   : imem_req  ,
+        i_imem_resp  : imem_rdata,
+        o_dmem_req   : dmem_req  ,
+        i_dmem_rdata : dmem_rdata,
+        o_inst_retire: o_inst_retire,
+        o_retire_pc  : o_retire_pc  ,
+        o_retire_rd  : o_retire_rd  ,
+        o_retire_wdata: o_retire_wdata,
+        o_halt       : o_halt       ,
+    );
+
+    // ------------------------------------------------------------------
+    // unified RAM
+    // ------------------------------------------------------------------
+    #[allow(unassign_variable)]
+    var mem: logic<32> [WORDS];
+
+    // test program loader (highest write priority, used from tb only)
+    always_ff {
+        if i_load_en {
+            mem[i_load_addr] = i_load_wdata;
+        }
+    }
+
+    // instruction fetch: combinational
+    assign imem_rdata = mem[imem_req.addr[2 +: ADDR_BITS]];
+
+    // data read: combinational
+    assign dmem_rdata = mem[dmem_req.addr[2 +: ADDR_BITS]];
+
+    // data write: synchronous, byte-lane strobes from funct3 + addr.
+    // Sub-word store data is first aligned so that every enabled lane
+    // finds its byte in the matching position of wdata_al.
+    var wstrb    : logic<4>;
+    var wdata_al : logic<32>;
+    always_comb {
+        case dmem_req.funct3 {
+            3'b000, 3'b100: { // SB
+                wstrb = 4'b0001 << dmem_req.addr[1:0];
+            }
+            3'b001, 3'b101: { // SH
+                wstrb = if dmem_req.addr[1] ? 4'b1100 : 4'b0011;
+            }
+            default: { // SW
+                wstrb = 4'b1111;
+            }
+        }
+        case dmem_req.funct3 {
+            3'b000, 3'b100: { // SB: byte 0 of wdata into the addressed lane
+                case dmem_req.addr[1:0] {
+                    2'd0: { wdata_al = {24'h0, dmem_req.wdata[7:0]}; }
+                    2'd1: { wdata_al = {16'h0, dmem_req.wdata[7:0], 8'h0}; }
+                    2'd2: { wdata_al = {8'h0, dmem_req.wdata[7:0], 16'h0}; }
+                    2'd3: { wdata_al = {dmem_req.wdata[7:0], 24'h0}; }
+                }
+            }
+            3'b001, 3'b101: { // SH: halfword into the addressed lane pair
+                wdata_al = if dmem_req.addr[1] ? {dmem_req.wdata[15:0], 16'h0}
+                              : {16'h0, dmem_req.wdata[15:0]};
+            }
+            default: { // SW
+                wdata_al = dmem_req.wdata;
+            }
+        }
+    }
+
+    always_ff {
+        if dmem_req.valid && dmem_req.write {
+            if wstrb[0] {
+                mem[dmem_req.addr[2 +: ADDR_BITS]][7:0] = wdata_al[7:0];
+            }
+            if wstrb[1] {
+                mem[dmem_req.addr[2 +: ADDR_BITS]][15:8] = wdata_al[15:8];
+            }
+            if wstrb[2] {
+                mem[dmem_req.addr[2 +: ADDR_BITS]][23:16] = wdata_al[23:16];
+            }
+            if wstrb[3] {
+                mem[dmem_req.addr[2 +: ADDR_BITS]][31:24] = wdata_al[31:24];
+            }
+        }
+    }
+}

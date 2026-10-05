@@ -1,0 +1,42 @@
+/// Hazard Detection Unit (pure combinational).
+/// Rules:
+///  * load-use: a load in ID/EX whose destination matches a source
+///    register of the instruction in IF/ID -> freeze the PC, hold
+///    IF/ID (keeping the dependent instruction) and inject a bubble
+///    into ID/EX. The load therefore advances into EX/MEM while the
+///    dependent instruction enters EX one cycle later, at which point
+///    the load sits in MEM/WB and its data is forwarded.
+///  * branch/jump/trap redirect -> squash the two instructions already
+///    in flight (IF/ID and ID/EX).
+///  * a redirect and a load-use stall cannot coexist: the redirect
+///    comes from ID/EX, which by definition is not a load then.
+module rv32i_hazard (
+    // ID/EX side (instruction being executed)
+    i_ex_memread : input logic     ,
+    i_ex_rd      : input logic<5>  ,
+    // IF/ID side (instruction being decoded)
+    i_id_rs1     : input logic<5>  ,
+    i_id_rs2     : input logic<5>  ,
+    i_id_valid   : input logic     ,
+    // redirect request from EX (taken branch / jump / trap)
+    i_redirect   : input logic     ,
+    // pipeline control outputs
+    o_stall_if   : output logic    ,
+    o_stall_id   : output logic    ,
+    o_flush_if_id: output logic    ,
+    o_flush_id_ex: output logic    ,
+) {
+    always_comb {
+        // load-use hazard: never match against x0
+        let load_use: logic =
+            i_ex_memread && (i_ex_rd != 0) && i_id_valid &&
+            ((i_ex_rd == i_id_rs1) || (i_ex_rd == i_id_rs2));
+
+        // freeze the PC and hold IF/ID with the dependent instruction;
+        // the bubble goes into ID/EX so the load keeps moving
+        o_stall_if    = load_use;
+        o_stall_id    = load_use;
+        o_flush_if_id = i_redirect;
+        o_flush_id_ex = i_redirect || load_use;
+    }
+}

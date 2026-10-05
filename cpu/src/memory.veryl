@@ -1,0 +1,31 @@
+/// Memory stage (combinational).
+/// Drives the data-memory request from the EX/MEM payload and
+/// sign-extends the load data according to funct3 (LB/LBU/LH/LHU/LW).
+module rv32i_memory (
+    i_exmem   : input  riscv_pkg::ExMem   ,
+    i_mem_rdata: input logic<32>          , // raw word from memory
+    o_mem_req : output riscv_pkg::MemReq  ,
+    o_load    : output logic<32>          , // sign/zero-extended load
+) {
+    always_comb {
+        o_mem_req.valid  = i_exmem.ctrl.valid &&
+            (i_exmem.ctrl.mem_read || i_exmem.ctrl.mem_write);
+        o_mem_req.write  = i_exmem.ctrl.mem_write;
+        o_mem_req.addr   = i_exmem.alu;
+        o_mem_req.wdata  = i_exmem.store;
+        o_mem_req.funct3 = i_exmem.ctrl.funct3;
+
+        let abyte: logic<8> = i_mem_rdata[8 * i_exmem.alu[1:0] +: 8];
+        let ahalf: logic<16> = if i_exmem.alu[1] ? i_mem_rdata[31:16]
+                              : i_mem_rdata[15:0];
+
+        o_load = case i_exmem.ctrl.funct3 {
+            3'b000: {abyte[msb] repeat 24, abyte}, // LB
+            3'b001: {ahalf[msb] repeat 16, ahalf}, // LH
+            3'b010: i_mem_rdata,                 // LW
+            3'b100: {24'h0, abyte},               // LBU
+            3'b101: {16'h0, ahalf},               // LHU
+            default: i_mem_rdata,
+        };
+    }
+}

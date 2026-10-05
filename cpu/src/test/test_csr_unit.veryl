@@ -1,0 +1,79 @@
+/// Unit test: rv32i_csr
+/// Reset values, writable CSRs (mtvec WARL mask, mscratch), trap entry
+/// (mcause/mepc), read-only ignores and default-zero reads.
+#[allow(unused_variable)]
+#[test(test_csrfile)]
+module test_csrfile {
+    inst clk: $tb::clock_gen;
+    #[allow(initial_assign)]
+    var rst: reset;
+
+    var we: logic;
+    var addr: logic<12>;
+    var wdata: logic<32>;
+    var rdata: logic<32>;
+    var trap: logic;
+    var trap_cause: logic<32>;
+    var trap_epc: logic<32>;
+    var mtvec: logic<32>;
+    var mepc: logic<32>;
+
+    inst dut: rv32i_csr (
+        i_clk: clk, i_rst: rst,
+        i_we: we, i_addr: addr, i_wdata: wdata, o_rdata: rdata,
+        i_trap: trap, i_trap_cause: trap_cause, i_trap_epc: trap_epc,
+        o_mtvec: mtvec, o_mepc: mepc,
+    );
+
+    initial {
+        rst = 1;
+        we = 0; addr = 0; wdata = 0;
+        trap = 0; trap_cause = 0; trap_epc = 0;
+        clk.next();
+        $assert(mtvec == 32'h4, "mtvec reset %h", mtvec);
+        $assert(mepc == 32'h0, "mepc reset");
+        rst = 0;
+
+        // csrw mtvec with a non-default value; low two bits are masked
+        we = 1; addr = 12'h305; wdata = 32'h0000_1005;
+        clk.next();
+        we = 0;
+        $assert(mtvec == 32'h1004, "mtvec masked %h", mtvec);
+        addr = 12'h305;
+        $assert(rdata == 32'h1004, "mtvec read %h", rdata);
+
+        // csrw mscratch / read it back
+        we = 1; addr = 12'h340; wdata = 32'hdead_beef;
+        clk.next();
+        we = 0;
+        addr = 12'h340;
+        $assert(rdata == 32'hdead_beef, "mscratch %h", rdata);
+
+        // trap entry writes mcause/mepc
+        trap = 1; trap_cause = 32'h2; trap_epc = 32'h0000_0028;
+        clk.next();
+        trap = 0;
+        $assert(mepc == 32'h28, "mepc from trap %h", mepc);
+        addr = 12'h342;
+        $assert(rdata == 32'h2, "mcause %h", rdata);
+
+        // mcause / mepc are also csrw-able
+        we = 1; addr = 12'h342; wdata = 32'h7;
+        clk.next();
+        we = 0;
+        $assert(rdata == 32'h7, "mcause csrw %h", rdata);
+
+        // read-only CSRs read zero and ignore writes
+        we = 1; addr = 12'hf11; wdata = 32'h5;   // mvendorid
+        clk.next();
+        we = 0;
+        addr = 12'hf11;
+        $assert(rdata == 32'h0, "mvendorid %h", rdata);
+
+        // unknown addresses read zero
+        addr = 12'h001;
+        $assert(rdata == 32'h0, "unknown csr");
+
+        $finish();
+    }
+}

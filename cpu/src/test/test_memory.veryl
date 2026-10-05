@@ -1,0 +1,78 @@
+/// Unit test: rv32i_memory
+/// Load extension for every width, byte/half positioning inside the raw
+/// word, store request fields and bubble handling.
+#[allow(unused_variable)]
+#[test(test_memory)]
+module test_memory {
+    var exmem: riscv_pkg::ExMem;
+    var rdata: logic<32>;
+    var req: riscv_pkg::MemReq;
+    var load: logic<32>;
+
+    var m_read: logic;
+    var m_write: logic;
+    var m_valid: logic;
+    var f3: logic<3>;
+    var alu: logic<32>;
+    var store: logic<32>;
+
+    // drive the ExMem payload from flat inputs (simpler for the test)
+    always_comb {
+        exmem.ctrl.valid     = m_valid;
+        exmem.ctrl.mem_read  = m_read;
+        exmem.ctrl.mem_write = m_write;
+        exmem.ctrl.funct3    = f3;
+        exmem.alu            = alu;
+        exmem.store          = store;
+    }
+
+    inst u_mem_req: rv32i_memory (
+        i_exmem: exmem, i_mem_rdata: rdata,
+        o_mem_req: req, o_load: load,
+    );
+
+    initial {
+        // word at 0x40 = 0x89abcdef, bytes little-endian:
+        // 0x40=ef 0x41=cd 0x42=ab 0x43=89
+        rdata = 32'h89ab_cdef;
+        m_valid = 1; m_write = 0; alu = 32'h40; store = 32'h1122_3344;
+
+        // bubble (not valid) issues no request
+        m_valid = 0;
+        $assert(!req.valid, "bubble req");
+        m_valid = 1;
+
+        // LW
+        m_read = 1; f3 = 3'b010;
+        $assert(req.valid && !req.write && req.addr == 32'h40, "lw req");
+        $assert(load == 32'h89ab_cdef, "lw %h", load);
+
+        // LB from byte 0 (sign) and byte 1
+        f3 = 3'b000;
+        $assert(load == 32'hffff_ffef, "lb b0 %h", load);
+        alu = 32'h41;
+        $assert(load == 32'hffff_ffcd, "lb b1 %h", load);
+
+        // LBU
+        f3 = 3'b100;
+        $assert(load == 32'h0000_00cd, "lbu %h", load);
+
+        // LH lower half (sign), then positive upper half
+        alu = 32'h40; f3 = 3'b001;
+        $assert(load == 32'hffff_cdef, "lh lo %h", load);
+        alu = 32'h42;
+        $assert(load == 32'hffff_89ab, "lh hi %h", load);
+
+        // LHU upper half
+        f3 = 3'b101;
+        $assert(load == 32'h0000_89ab, "lhu %h", load);
+
+        // store request fields
+        m_read = 0; m_write = 1; alu = 32'h44; f3 = 3'b010;
+        $assert(req.valid && req.write && req.addr == 32'h44 &&
+                req.wdata == 32'h1122_3344 && req.funct3 == 3'b010,
+                "store req");
+
+        $finish();
+    }
+}

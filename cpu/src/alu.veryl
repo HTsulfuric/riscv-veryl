@@ -1,0 +1,44 @@
+/// Arithmetic Logic Unit (EX stage, pure combinational).
+/// Implements ADD/SUB/SLL/SLT/SLTU/XOR/OR/AND/SHR/SRA and PASS.
+/// The `i_sra` modifier selects the arithmetic variant of SHR.
+module rv32i_alu (
+    i_op    : input  logic<4>  , // riscv_pkg::AluOp
+    i_sra   : input logic      , // arithmetic variant of SHR
+    i_a     : input  logic<32> ,
+    i_b     : input  logic<32> ,
+    o_result: output logic<32> ,
+    o_zero  : output logic     , // result == 0
+) {
+    var sa: signed logic<32>;
+    var sb: signed logic<32>;
+    var slt_bit : logic;
+    var sltu_bit: logic;
+
+    // the arithmetic shift must be computed on its own: mixing the
+    // signed `>>>` result directly into a ternary with an unsigned
+    // operand makes the toolchain evaluate it as a logical shift
+    var asr: logic<32>;
+
+    assign sa = i_a;
+    assign sb = i_b;
+    assign slt_bit = sa <: sb;
+    assign sltu_bit = i_a <: i_b;
+    assign asr = sa >>> i_b[4:0];
+
+    always_comb {
+        o_result = case i_op {
+            riscv_pkg::AluOp::ADD : i_a + i_b,
+            riscv_pkg::AluOp::SUB : i_a - i_b,
+            riscv_pkg::AluOp::SLL : i_a << i_b[4:0],
+            riscv_pkg::AluOp::SLT : {31'h0, slt_bit},
+            riscv_pkg::AluOp::SLTU: {31'h0, sltu_bit},
+            riscv_pkg::AluOp::XOR : i_a ^ i_b,
+            riscv_pkg::AluOp::OR  : i_a | i_b,
+            riscv_pkg::AluOp::AND : i_a & i_b,
+            riscv_pkg::AluOp::SHR : if i_sra ? asr : i_a >> i_b[4:0],
+            riscv_pkg::AluOp::PASS: i_b,
+            default     : 32'h0,
+        };
+        o_zero = o_result == 32'h0;
+    }
+}

@@ -1,0 +1,324 @@
+/// RV32I five-stage in-order pipeline CPU (top level).
+///
+/// Stages: IF -> ID -> EX -> MEM -> WB
+///  * no out-of-order execution, no forwarding networks:
+///    load-use hazards are resolved with a single stall cycle and
+///    all other RAW pairs are covered by the register-file
+///    write-through bypass,
+///  * branches/jumps/traps are resolved in EX with a 2-cycle bubble,
+///  * minimal machine-mode traps: mtvec = 0x4, MRET returns to mepc.
+///
+/// Memory is exposed as two simple request/response ports; both are
+/// assumed to respond combinationally (same cycle).
+module rv32i_core (
+    i_clk        : input clock               ,
+    i_rst        : input reset               ,
+    // instruction memory (combinational read)
+    o_imem_req   : output riscv_pkg::IfReq  ,
+    i_imem_resp  : input  logic<32>          ,
+    // data memory
+    o_dmem_req   : output riscv_pkg::MemReq  ,
+    i_dmem_rdata : input  logic<32>          ,
+    // retired instruction trace (for tests / simulation)
+    o_inst_retire: output logic              ,
+    o_retire_pc  : output logic<32>          ,
+    o_retire_rd  : output logic<5>           ,
+    o_retire_wdata: output logic<32>         ,
+    // halt: set when the program executes EBREAK
+    o_halt       : output logic              ,
+) {
+
+    // ------------------------------------------------------------------
+    // stage registers
+    // ------------------------------------------------------------------
+    var if_id_d : riscv_pkg::IfId;
+    var if_id_q : riscv_pkg::IfId;
+    var id_ex_d : riscv_pkg::IdEx;
+    var id_ex_q : riscv_pkg::IdEx;
+    var ex_mem_d: riscv_pkg::ExMem;
+    var ex_mem_q: riscv_pkg::ExMem;
+    var mem_wb_d: riscv_pkg::MemWb;
+    var mem_wb_q: riscv_pkg::MemWb;
+
+    // ------------------------------------------------------------------
+    // control
+    // ------------------------------------------------------------------
+    var pc_stall   : logic;
+    var id_stall   : logic;
+    var flush_if_id: logic;
+    var flush_id_ex: logic;
+
+    // halt latch: EBREAK executed in EX freezes the CPU
+    var halt_r: logic;
+    var run     : logic;
+    assign run = !halt_r;
+
+    // ------------------------------------------------------------------
+    // IF stage
+    // ------------------------------------------------------------------
+    var pc_value : logic<32>;
+    var redirect : logic;
+    var redir_pc : logic<32>;
+
+    inst u_pc: rv32i_pc (
+        i_clk      ,
+        i_rst        ,
+        i_stall    : pc_stall || !run,
+        i_redir    : redirect,
+        i_redir_pc : redir_pc,
+        o_pc       : pc_value,
+        o_pc_plus4 : _       ,
+    );
+
+    assign o_imem_req.valid = 1;
+    assign o_imem_req.addr  = pc_value;
+
+    assign if_id_d.valid = 1;
+    assign if_id_d.pc    = pc_value;
+    assign if_id_d.insn  = i_imem_resp;
+
+    always_ff {
+        if_reset {
+            if_id_q = '0;
+        } else if flush_if_id || !run {
+            if_id_q = '0;
+        } else if !id_stall {
+            if_id_q = if_id_d;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // ID stage
+    // ------------------------------------------------------------------
+    let id_rs1: logic<5> = if_id_q.insn[19:15];
+    let id_rs2: logic<5> = if_id_q.insn[24:20];
+    let id_rd : logic<5> = if_id_q.insn[11:7];
+
+    var id_ctrl_raw: riscv_pkg::Ctrl;
+    var id_ctrl    : riscv_pkg::Ctrl;
+    assign id_ctrl_raw = riscv_decode::decode(if_id_q.insn);
+    // a flushed bubble must stay a NOP: the decoder marks every word
+    // (including zero) valid, so the valid bit comes from IF/ID
+    assign id_ctrl = if if_id_q.valid ? id_ctrl_raw : riscv_pkg::CTRL_NOP;
+    var id_imm: logic<32>;
+    assign id_imm = riscv_decode::immediate(if_id_q.insn, id_ctrl.imm_sel);
+
+    // the instruction in IF/ID is live only when it is not a bubble
+    let id_valid: logic = if_id_q.valid;
+
+    // source register numbers of the instruction now in ID/EX; the
+    // register file is read at the EX stage so that a load-use stall
+    // of a single cycle is sufficient (the value is written back by
+    // the time the dependent instruction executes)
+    let ex_rs1: logic<5> = id_ex_q.insn[19:15];
+    let ex_rs2: logic<5> = id_ex_q.insn[24:20];
+
+    var id_rdata1: logic<32>;
+    var id_rdata2: logic<32>;
+
+    // WB signals are needed by the regfile before they are declared;
+    // route them through these combinational aliases.
+    var wb_we   : logic;
+    var wb_addr : logic<5>;
+    var wb_data : logic<32>;
+    assign wb_we   = mem_wb_q.ctrl.valid && mem_wb_q.ctrl.regwrite;
+    assign wb_addr = mem_wb_q.rd;
+    assign wb_data = case mem_wb_q.ctrl.wb_sel {
+        riscv_pkg::WbSel::MEMORY: mem_wb_q.memdata,
+        default      : mem_wb_q.alu,
+    };
+
+    // read ports live at the EX stage; the write-through bypass covers
+    // producers that retire in the same cycle the consumer executes
+    inst u_regfile: rv32i_regfile (
+        i_clk, i_rst,
+        i_we      : wb_we      ,
+        i_waddr   : wb_addr    ,
+        i_wdata   : wb_data    ,
+        i_raddr1  : ex_rs1     ,
+        o_rdata1  : id_rdata1  ,
+        i_raddr2  : ex_rs2     ,
+        o_rdata2  : id_rdata2  ,
+        i_wt_we   : wb_we      ,
+        i_wt_addr : wb_addr    ,
+        i_wt_data : wb_data    ,
+    );
+
+    assign id_ex_d.pc       = if_id_q.pc;
+    assign id_ex_d.imm      = id_imm;
+    // operands are read in EX (from the register file plus the
+    // forwarding muxes), so no data is latched here
+    assign id_ex_d.rs1_data = 32'h0;
+    assign id_ex_d.rs2_data = 32'h0;
+    // CSR write source: zimm = insn[19:15] for the immediate forms;
+    // the register form is patched with the forwarded operand in EX
+    assign id_ex_d.csr_src  = if id_ctrl.alu_src ? {27'h0, if_id_q.insn[19:15]} : 32'h0;
+    assign id_ex_d.insn     = if_id_q.insn;
+    assign id_ex_d.rd       = id_rd;
+    assign id_ex_d.ctrl     = id_ctrl;
+
+    always_ff {
+        if_reset {
+            id_ex_q = '0;
+        } else if flush_id_ex || !run {
+            id_ex_q = '0;
+        } else {
+            id_ex_q = id_ex_d;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // hazard detection
+    // ------------------------------------------------------------------
+    inst u_hazard: rv32i_hazard (
+        i_ex_memread : id_ex_q.ctrl.mem_read,
+        i_ex_rd      : id_ex_q.rd,
+        i_id_rs1     : id_rs1,
+        i_id_rs2     : id_rs2,
+        i_id_valid   : id_valid,
+        i_redirect   : redirect,
+        o_stall_if   : pc_stall,
+        o_stall_id   : id_stall,
+        o_flush_if_id: flush_if_id,
+        o_flush_id_ex: flush_id_ex,
+    );
+
+    // ------------------------------------------------------------------
+    // EX stage
+    // ------------------------------------------------------------------
+    // ------------------------------------------------------------------
+    // operand forwarding for the EX stage
+    // ------------------------------------------------------------------
+    // distance-1 producers forward from EX/MEM, distance-2 from MEM/WB;
+    // distance-3+ is covered by the register-file write-through. A load
+    // in EX/MEM cannot forward (its data is not registered yet): the
+    // load-use stall covers distance-1, distance-2 loads forward here
+    // from MEM/WB instead.
+    let ex_fwd: logic = ex_mem_q.ctrl.valid && ex_mem_q.ctrl.regwrite &&
+                        (ex_mem_q.rd != 0) &&
+                        (ex_mem_q.ctrl.wb_sel != riscv_pkg::WbSel::MEMORY);
+    let wb_fwd: logic = wb_we && (mem_wb_q.rd != 0);
+
+    var fwd_a: logic<32>;
+    var fwd_b: logic<32>;
+    assign fwd_a = if ex_fwd && (ex_mem_q.rd == ex_rs1) ? ex_mem_q.wbvalue :
+                   if wb_fwd && (mem_wb_q.rd == ex_rs1) ? wb_data : id_rdata1;
+    assign fwd_b = if ex_fwd && (ex_mem_q.rd == ex_rs2) ? ex_mem_q.wbvalue :
+                   if wb_fwd && (mem_wb_q.rd == ex_rs2) ? wb_data : id_rdata2;
+
+    // the EX stage (and the store data path) always see forwarded operands
+    var id_ex_fw: riscv_pkg::IdEx;
+    assign id_ex_fw.pc       = id_ex_q.pc;
+    assign id_ex_fw.imm      = id_ex_q.imm;
+    assign id_ex_fw.rs1_data = fwd_a;
+    assign id_ex_fw.rs2_data = fwd_b;
+    assign id_ex_fw.csr_src  = if id_ex_q.ctrl.alu_src ? id_ex_q.csr_src : fwd_a;
+    assign id_ex_fw.insn     = id_ex_q.insn;
+    assign id_ex_fw.rd       = id_ex_q.rd;
+    assign id_ex_fw.ctrl     = id_ex_q.ctrl;
+
+    var csr_rdata : logic<32>;
+    var csr_we    : logic;
+    var csr_addr  : logic<12>;
+    var csr_wdata : logic<32>;
+    var trap      : logic;
+    var trap_cause: logic<32>;
+    var trap_epc  : logic<32>;
+    var mepc      : logic<32>;
+    var mtvec     : logic<32>;
+    var ex_alu    : logic<32>;
+    var ex_wbvalue: logic<32>;
+
+    inst u_execute: rv32i_execute (
+        i_idex      : id_ex_fw,
+        i_csr_rdata : csr_rdata,
+        o_csr_we    : csr_we,
+        o_csr_addr  : csr_addr,
+        o_csr_wdata : csr_wdata,
+        o_redirect  : redirect,
+        o_redirect_pc: redir_pc,
+        o_trap      : trap,
+        o_trap_cause: trap_cause,
+        o_trap_epc  : trap_epc,
+        i_mepc      : mepc,
+        i_mtvec     : mtvec,
+        o_alu       : ex_alu,
+        o_wbvalue   : ex_wbvalue,
+    );
+
+    always_ff {
+        if_reset {
+            halt_r = 0;
+        } else if trap && id_ex_q.ctrl.ebreak {
+            halt_r = 1;
+        }
+    }
+
+    inst u_csr: rv32i_csr (
+        i_clk, i_rst,
+        i_we        : csr_we,
+        i_addr      : csr_addr,
+        i_wdata     : csr_wdata,
+        o_rdata     : csr_rdata,
+        i_trap      : trap,
+        i_trap_cause: trap_cause,
+        i_trap_epc  : trap_epc,
+        o_mtvec     : mtvec,
+        o_mepc      : mepc,
+    );
+
+    assign ex_mem_d.pc    = id_ex_q.pc;
+    assign ex_mem_d.alu   = ex_alu;
+    assign ex_mem_d.store = fwd_b;
+    assign ex_mem_d.rd    = id_ex_q.rd;
+    // a trapped instruction (illegal / ebreak) is squashed instead of
+    // retiring, matching the golden model's retire trace
+    assign ex_mem_d.ctrl  = if trap ? riscv_pkg::CTRL_NOP : id_ex_q.ctrl;
+    assign ex_mem_d.wbvalue = ex_wbvalue;
+
+    always_ff {
+        if_reset {
+            ex_mem_q = '0;
+        } else {
+            ex_mem_q = ex_mem_d;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // MEM stage
+    // ------------------------------------------------------------------
+    var mem_load: logic<32>;
+
+    inst u_memory: rv32i_memory (
+        i_exmem     : ex_mem_q,
+        i_mem_rdata : i_dmem_rdata,
+        o_mem_req   : o_dmem_req,
+        o_load      : mem_load,
+    );
+
+    assign mem_wb_d.pc      = ex_mem_q.pc;
+    assign mem_wb_d.alu     = ex_mem_q.wbvalue;
+    assign mem_wb_d.memdata = mem_load;
+    assign mem_wb_d.rd      = ex_mem_q.rd;
+    assign mem_wb_d.ctrl    = ex_mem_q.ctrl;
+
+    always_ff {
+        if_reset {
+            mem_wb_q = '0;
+        } else {
+            mem_wb_q = mem_wb_d;
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // WB stage / retire trace
+    // ------------------------------------------------------------------
+    assign o_inst_retire  = mem_wb_q.ctrl.valid;
+    assign o_retire_pc    = mem_wb_q.pc;
+    assign o_retire_rd    = mem_wb_q.rd;
+    // instructions without a register write retire with data 0, which
+    // matches the golden model's trace records
+    assign o_retire_wdata = if mem_wb_q.ctrl.regwrite ? wb_data : 32'h0;
+
+    assign o_halt = halt_r;
+}

@@ -1,0 +1,119 @@
+/// Unit test: riscv_decode
+/// Decodes one representative instruction per form and checks the
+/// control word plus the immediate generator against the RISC-V specs.
+#[allow(unused_variable)]
+#[test(test_decoder)]
+module test_decoder {
+    #[allow(initial_assign)]
+    var insn: logic<32>;
+    var c: riscv_pkg::Ctrl;
+    var imm: logic<32>;
+
+    always_comb {
+        c = riscv_decode::decode(insn);
+        imm = riscv_decode::immediate(insn, c.imm_sel);
+    }
+
+    initial {
+        // ---- addi t0, zero, 5  (I-type ALU, imm positive) ----
+        insn = 32'h00500293;
+        $assert(c.valid && c.regwrite && !c.mem_read && !c.mem_write &&
+                !c.branch && !c.jump && !c.csr_en && !c.illegal &&
+                c.alu_src && !c.pc_src, "addi ctrl");
+        $assert(c.wb_sel == riscv_pkg::WbSel::ALU, "addi wb");
+        $assert(c.aluop == riscv_pkg::AluOp::ADD, "addi op");
+        $assert(imm == 32'h5, "addi imm %h", imm);
+
+        // ---- addi with negative immediate (sign extension) ----
+        insn = 32'hffc00093;
+        $assert(imm == 32'hffff_fffc, "addi -4 imm %h", imm);
+
+        // ---- add / sub (R-type decode) ----
+        insn = 32'h002081b3; // add gp, ra, sp
+        $assert(c.regwrite && !c.alu_src && c.aluop == riscv_pkg::AluOp::ADD,
+                "add");
+        insn = 32'h40208233; // sub tp, ra, sp
+        $assert(c.aluop == riscv_pkg::AluOp::SUB, "sub");
+
+        // ---- shifts: funct3=101 distinguishes SRL/SRA by insn[30] ----
+        insn = 32'h0010d613; // srli
+        $assert(c.aluop == riscv_pkg::AluOp::SHR && !c.sra, "srli");
+        insn = 32'h40125693; // srai
+        $assert(c.aluop == riscv_pkg::AluOp::SHR && c.sra, "srai");
+        insn = 32'h00209593; // slli
+        $assert(c.aluop == riscv_pkg::AluOp::SLL && c.sra == 0, "slli");
+        insn = 32'h4000d2b3; // sra x5,x1,x0 (register form)
+        $assert(c.aluop == riscv_pkg::AluOp::SHR && c.sra, "sra-reg");
+
+        // ---- lui / auipc ----
+        insn = 32'h00001a37; // lui s4, 0x1
+        $assert(c.aluop == riscv_pkg::AluOp::PASS && !c.pc_src, "lui");
+        $assert(imm == 32'h0000_1000, "lui imm %h", imm);
+        insn = 32'h00000b17; // auipc s6, 0
+        $assert(c.pc_src && c.aluop == riscv_pkg::AluOp::ADD, "auipc");
+
+        // ---- jal / jalr ----
+        insn = 32'h00c0006f; // jal +12
+        $assert(c.jump && !c.branch && c.wb_sel == riscv_pkg::WbSel::PC4,
+                "jal");
+        $assert(imm == 32'hc, "jal +12 imm %h", imm);
+        insn = 32'hfb5ff06f; // jal -0x4c (from jump.S)
+        $assert(imm == 32'hffff_ffb4, "jal neg imm %h", imm);
+        insn = 32'h00008067; // jalr ra, 0(ra)
+        $assert(c.jump && c.alu_src && c.wb_sel == riscv_pkg::WbSel::PC4,
+                "jalr");
+
+        // ---- branches (B-type immediate) ----
+        insn = 32'h0041c463; // blt, +8
+        $assert(c.branch && !c.jump && c.wb_sel == riscv_pkg::WbSel::ALU,
+                "blt");
+        $assert(c.funct3 == 3'b100, "blt f3");
+        $assert(imm == 32'h8, "b +8 imm %h", imm);
+        insn = 32'h00051663; // bnez, +12
+        $assert(imm == 32'hc, "b +12 imm %h", imm);
+
+        // ---- load / store ----
+        insn = 32'h00452203; // lw tp, 4(a0)
+        $assert(c.mem_read && !c.mem_write && c.alu_src &&
+                c.wb_sel == riscv_pkg::WbSel::MEMORY && c.funct3 == 3'b010,
+                "lw");
+        $assert(imm == 32'h4, "lw imm %h", imm);
+        insn = 32'h00151523; // sh ra, 10(a0)   (S-type immediate)
+        $assert(c.mem_write && !c.mem_read && !c.regwrite &&
+                c.funct3 == 3'b001, "sh");
+        $assert(imm == 32'ha, "sh imm %h", imm);
+        insn = 32'hffe02e23; // negative S immediate: -4
+        $assert(imm == 32'hffff_fffc, "s neg imm %h", imm);
+
+        // ---- CSR forms ----
+        insn = 32'h3400_1073; // csrrw rd, mscratch, rs1
+        $assert(c.csr_en && !c.alu_src && c.regwrite &&
+                c.wb_sel == riscv_pkg::WbSel::ALU,
+                "csrrw");
+        insn = 32'h3402_d0f3; // csrrwi x1, mscratch, 5
+        $assert(c.csr_en && c.alu_src && ((insn >> 15) & 31) == 32'd5,
+                "csrrwi zimm=insn[19:15]");
+
+        // ---- system ----
+        insn = 32'h00100073; // ebreak
+        $assert(c.ebreak && !c.illegal && !c.mret && !c.regwrite, "ebreak");
+        insn = 32'h30200073; // mret
+        $assert(c.mret && c.regwrite && c.wb_sel == riscv_pkg::WbSel::PC,
+                "mret");
+        insn = 32'h00000073; // ecall -> illegal
+        $assert(c.illegal, "ecall illegal");
+
+        // ---- illegal words ----
+        insn = 32'hffff_ffff;
+        $assert(c.valid && c.illegal, "bogus opcode");
+        insn = 32'h0000_0000;
+        $assert(c.valid && c.illegal, "zero word");
+
+        // ---- fence is a nop ----
+        insn = 32'h0ff0000f;
+        $assert(c.valid && !c.regwrite && !c.mem_read && !c.mem_write &&
+                !c.branch && !c.jump && !c.illegal, "fence nop");
+
+        $finish();
+    }
+}

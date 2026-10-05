@@ -1,0 +1,66 @@
+/// Unit test: rv32i_pc
+/// Checks reset value, natural +4 advance, stall freeze and that a
+/// redirect takes precedence over a stall.
+#[allow(unused_variable)]
+#[test(test_pc)]
+module test_pc {
+    inst clk: $tb::clock_gen;
+    #[allow(initial_assign)]
+    var rst: reset;
+
+    var stall: logic;
+    var redir: logic;
+    var redir_pc: logic<32>;
+    var pc: logic<32>;
+    var pc4: logic<32>;
+
+    inst dut: rv32i_pc (
+        i_clk: clk,
+        i_rst: rst,
+        i_stall: stall,
+        i_redir: redir,
+        i_redir_pc: redir_pc,
+        o_pc: pc,
+        o_pc_plus4: pc4,
+    );
+
+    initial {
+        rst = 1;
+        stall = 0;
+        redir = 0;
+        redir_pc = 0;
+        clk.next();
+        rst = 0;
+
+        // pc starts at 0 and advances by 4 each cycle
+        $assert(pc == 32'h0, "reset pc %h", pc);
+        clk.next();
+        $assert(pc == 32'h4, "pc after 1 %h", pc);
+        $assert(pc4 == 32'h8, "pc+4 %h", pc4);
+        clk.next();
+        $assert(pc == 32'h8, "pc after 2 %h", pc);
+
+        // stall freezes the counter
+        stall = 1;
+        clk.next();
+        $assert(pc == 32'h8, "stalled %h", pc);
+        clk.next();
+        $assert(pc == 32'h8, "still stalled %h", pc);
+        stall = 0;
+        clk.next();
+        $assert(pc == 32'hc, "unstalled %h", pc);
+
+        // redirect wins even when stalled
+        redir = 1;
+        redir_pc = 32'h80;
+        stall = 1;
+        clk.next();
+        $assert(pc == 32'h80, "redirect %h", pc);
+        redir = 0;
+        stall = 0;
+        clk.next();
+        $assert(pc == 32'h84, "after redirect %h", pc);
+
+        $finish();
+    }
+}

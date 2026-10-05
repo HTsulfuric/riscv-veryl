@@ -1,0 +1,76 @@
+/// Unit test: rv32i_alu
+/// Exercises every ALU operation, the shift-amount masking, the signed
+/// vs unsigned compares and the arithmetic/logical shift-right choice.
+#[allow(unused_variable)]
+#[test(test_alu)]
+module test_alu {
+    var op: logic<4>;
+    var sra: logic;
+    var a: logic<32>;
+    var b: logic<32>;
+    var res: logic<32>;
+    var zero: logic;
+
+    inst dut: rv32i_alu (
+        i_op: op, i_sra: sra, i_a: a, i_b: b,
+        o_result: res, o_zero: zero,
+    );
+
+    initial {
+        // ADD + wrap-around carry-out is discarded (32-bit)
+        op = riscv_pkg::AluOp::ADD; sra = 0;
+        a = 32'h0000_0005; b = 32'h0000_0009;
+        $assert(res == 32'he, "add %h", res);
+        a = 32'hffff_ffff; b = 32'h0000_0001;
+        $assert(res == 32'h0000_0000, "wrap %h", res);
+        a = 32'h0; b = 32'h0;
+        $assert(res == 32'h0 && zero, "zero flag");
+
+        // SUB
+        op = riscv_pkg::AluOp::SUB;
+        a = 32'h0000_0005; b = 32'h0000_0009;
+        $assert(res == 32'hffff_fffc, "sub %h", res);
+
+        // SLL, shift amount masked to 5 bits (b[4:0] = 1)
+        op = riscv_pkg::AluOp::SLL;
+        a = 32'h8000_0001; b = 32'h0000_0021;
+        $assert(res == 32'h0000_0002, "sll masked %h", res);
+
+        // SLT (signed)
+        op = riscv_pkg::AluOp::SLT;
+        a = 32'hffff_ffff; b = 32'h0000_0001;   // -1 < 1
+        $assert(res == 32'h1, "slt neg %h", res);
+        a = 32'h0000_0001; b = 32'hffff_ffff;   // 1 < -1 ?
+        $assert(res == 32'h0, "slt pos %h", res);
+
+        // SLTU (unsigned): 0 < 0xffff_ffff
+        op = riscv_pkg::AluOp::SLTU;
+        a = 32'h0000_0000; b = 32'hffff_ffff;
+        $assert(res == 32'h1, "sltu %h", res);
+
+        // bitwise ops
+        op = riscv_pkg::AluOp::XOR;
+        a = 32'hff00_ff00; b = 32'h0ff0_0ff0;
+        $assert(res == 32'hf0f0_f0f0, "xor %h", res);
+        op = riscv_pkg::AluOp::OR;
+        $assert(res == 32'hfff0_fff0, "or %h", res);
+        op = riscv_pkg::AluOp::AND;
+        $assert(res == 32'h0f00_0f00, "and %h", res);
+
+        // logical shift right (sra = 0)
+        op = riscv_pkg::AluOp::SHR; sra = 0;
+        a = 32'hffff_fffc; b = 32'h0000_0001;
+        $assert(res == 32'h7fff_fffe, "shr %h", res);
+
+        // arithmetic shift right (sra = 1): sign bit replicates
+        sra = 1;
+        $assert(res == 32'hffff_fffe, "sar %h", res);
+
+        // PASS: forward the second operand unchanged
+        op = riscv_pkg::AluOp::PASS;
+        a = 32'h1234_5678; b = 32'habcd_ef00;
+        $assert(res == 32'habcd_ef00, "pass %h", res);
+
+        $finish();
+    }
+}

@@ -1,0 +1,50 @@
+/// Unit test: rv32i_pipe_reg
+/// Reset clears the register, flush injects a zero bubble (with
+/// priority over stall), stall holds, otherwise the input is captured.
+#[allow(unused_variable)]
+#[test(test_pipe_reg)]
+module test_pipe_reg {
+    inst clk: $tb::clock_gen;
+    #[allow(initial_assign)]
+    var rst: reset;
+
+    var flush: logic;
+    var stall: logic;
+    var d: logic<32>;
+    var q: logic<32>;
+
+    inst dut: rv32i_pipe_reg #(WIDTH: 32) (
+        i_clk: clk, i_rst: rst,
+        i_flush: flush, i_stall: stall, i_d: d, o_q: q,
+    );
+
+    initial {
+        rst = 1;
+        flush = 0; stall = 0; d = 32'ha5a5_a5a5;
+        clk.next();
+        $assert(q == 32'h0, "reset %h", q);
+        rst = 0;
+
+        // capture
+        d = 32'h1234_5678;
+        clk.next();
+        $assert(q == 32'h1234_5678, "capture %h", q);
+
+        // hold while stalled (new input is not lost, just not taken)
+        stall = 1;
+        d = 32'hdead_beef;
+        clk.next();
+        $assert(q == 32'h1234_5678, "stall %h", q);
+        stall = 0;
+        clk.next();
+        $assert(q == 32'hdead_beef, "release %h", q);
+
+        // flush wins over stall
+        flush = 1; stall = 1;
+        clk.next();
+        $assert(q == 32'h0, "flush %h", q);
+        flush = 0;
+
+        $finish();
+    }
+}

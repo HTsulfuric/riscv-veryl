@@ -1,0 +1,190 @@
+/// Instruction Decoder (ID stage, pure combinational).
+/// Takes a 32-bit instruction word and produces:
+///  * the control word for the whole back half of the pipeline,
+///  * the sign-extended immediate in the canonical form,
+///  * the branch condition code (evaluated in EX).
+package riscv_decode {
+
+    /// branch condition codes
+    enum BranchOp: logic<3> {
+        BEQ  = 3'd0,
+        BNE  = 3'd1,
+        BLT  = 3'd4,
+        BGE  = 3'd5,
+        BLTU = 3'd6,
+        BGEU = 3'd7,
+    }
+
+    /// decode the instruction into the pipeline control word
+    function decode (
+        insn: input logic<32>,
+    ) -> riscv_pkg::Ctrl {
+        let opcode: logic<7> = insn[6:0];
+        let funct3: logic<3> = insn[14:12];
+        let funct7: logic<7> = insn[31:25];
+
+        var c: riscv_pkg::Ctrl;
+        c = riscv_pkg::CTRL_NOP;
+        c.valid   = 1;
+        c.funct3  = funct3;
+
+        case opcode {
+            riscv_pkg::Opcode::OP_LUI: {
+                c.regwrite = 1;
+                c.wb_sel   = riscv_pkg::WbSel::ALU;
+                c.aluop    = riscv_pkg::AluOp::PASS;
+                c.alu_src  = 1;
+                c.imm_sel  = riscv_pkg::ImmSel::U;
+            }
+            riscv_pkg::Opcode::OP_AUIPC: {
+                c.regwrite = 1;
+                c.wb_sel   = riscv_pkg::WbSel::ALU;
+                c.aluop    = riscv_pkg::AluOp::ADD;
+                c.alu_src  = 1;
+                c.pc_src   = 1;
+                c.imm_sel  = riscv_pkg::ImmSel::U;
+            }
+            riscv_pkg::Opcode::OP_JAL: {
+                c.regwrite = 1;
+                c.wb_sel   = riscv_pkg::WbSel::PC4;
+                c.jump     = 1;
+                c.imm_sel  = riscv_pkg::ImmSel::J;
+            }
+            riscv_pkg::Opcode::OP_JALR: {
+                c.regwrite = 1;
+                c.wb_sel   = riscv_pkg::WbSel::PC4;
+                c.jump     = 1;
+                c.alu_src  = 1;
+                c.imm_sel  = riscv_pkg::ImmSel::I;
+            }
+            riscv_pkg::Opcode::OP_BRANCH: {
+                c.branch  = 1;
+                c.aluop   = riscv_pkg::AluOp::SUB;
+                c.imm_sel = riscv_pkg::ImmSel::B;
+            }
+            riscv_pkg::Opcode::OP_LOAD: {
+                c.regwrite  = 1;
+                c.wb_sel    = riscv_pkg::WbSel::MEMORY;
+                c.aluop     = riscv_pkg::AluOp::ADD;
+                c.alu_src   = 1;
+                c.imm_sel   = riscv_pkg::ImmSel::I;
+                c.mem_read  = 1;
+            }
+            riscv_pkg::Opcode::OP_STORE: {
+                c.aluop     = riscv_pkg::AluOp::ADD;
+                c.alu_src   = 1;
+                c.imm_sel   = riscv_pkg::ImmSel::S;
+                c.mem_write = 1;
+            }
+            riscv_pkg::Opcode::OP_ALUI: {
+                c.regwrite = 1;
+                c.wb_sel   = riscv_pkg::WbSel::ALU;
+                c.alu_src  = 1;
+                c.imm_sel  = riscv_pkg::ImmSel::I;
+                c.aluop    = switch {
+                    funct3 == 3'b000: riscv_pkg::AluOp::ADD,
+                    funct3 == 3'b001: riscv_pkg::AluOp::SLL,
+                    funct3 == 3'b010: riscv_pkg::AluOp::SLT,
+                    funct3 == 3'b011: riscv_pkg::AluOp::SLTU,
+                    funct3 == 3'b100: riscv_pkg::AluOp::XOR,
+                    funct3 == 3'b110: riscv_pkg::AluOp::OR,
+                    funct3 == 3'b111: riscv_pkg::AluOp::AND,
+                    default       : riscv_pkg::AluOp::ADD,
+                };
+                // SRL(0101)/SRA(101) share funct3 == 3'b101 with SLL
+                if funct3 == 3'b101 && funct7[5] {
+                    c.aluop = riscv_pkg::AluOp::SHR; // SRA (EX picks arithmetic)
+                    c.sra   = 1;
+                }
+                if funct3 == 3'b101 && !funct7[5] {
+                    c.aluop = riscv_pkg::AluOp::SHR; // logical shift right
+                }
+            }
+            riscv_pkg::Opcode::OP_ALUR: {
+                c.regwrite = 1;
+                c.wb_sel   = riscv_pkg::WbSel::ALU;
+                c.imm_sel  = riscv_pkg::ImmSel::NONE;
+                c.aluop    = switch {
+                    funct3 == 3'b000 && !funct7[5]: riscv_pkg::AluOp::ADD,
+                    funct3 == 3'b000 && funct7[5] : riscv_pkg::AluOp::SUB,
+                    funct3 == 3'b001               : riscv_pkg::AluOp::SLL,
+                    funct3 == 3'b010               : riscv_pkg::AluOp::SLT,
+                    funct3 == 3'b011               : riscv_pkg::AluOp::SLTU,
+                    funct3 == 3'b100               : riscv_pkg::AluOp::XOR,
+                    funct3 == 3'b110               : riscv_pkg::AluOp::OR,
+                    funct3 == 3'b111               : riscv_pkg::AluOp::AND,
+                    default                        : riscv_pkg::AluOp::ADD,
+                };
+                if funct3 == 3'b101 && funct7[5] {
+                    c.aluop = riscv_pkg::AluOp::SHR; // SRA (EX picks arithmetic)
+                    c.sra   = 1;
+                }
+                if funct3 == 3'b101 && !funct7[5] {
+                    c.aluop = riscv_pkg::AluOp::SHR; // logical shift right
+                }
+            }
+            riscv_pkg::Opcode::OP_FENCE: {
+                // no-op: single hart, in-order, always coherent
+            }
+            riscv_pkg::Opcode::OP_SYSTEM: {
+                if funct3 == 3'b000 {
+                    // privileged / unprivileged instructions
+                    case insn[31:20] {
+                        12'h000: {
+                            // ECALL: unimplemented -> trap
+                            c.illegal = 1;
+                        }
+                        12'h001: {
+                            c.ebreak = 1;
+                        }
+                        12'h302: {
+                            // MRET: rd <= pc (convention), redirect to mepc
+                            c.regwrite = 1;
+                            c.wb_sel   = riscv_pkg::WbSel::PC;
+                            c.mret     = 1;
+                        }
+                        default: {
+                            c.illegal = 1;
+                        }
+                    }
+                } else if inside funct3 {3'b001, 3'b010, 3'b011,
+                                           3'b101, 3'b110, 3'b111} {
+                    // CSRRW/S/C (f3[2]=0) and CSRRWI/SI/CI (f3[2]=1)
+                    c.regwrite = 1;
+                    c.wb_sel   = riscv_pkg::WbSel::ALU;
+                    c.csr_en   = 1;
+                    c.alu_src  = funct3[2]; // CSRR*I uses the immediate
+                    c.imm_sel  = riscv_pkg::ImmSel::I;
+                } else {
+                    c.illegal = 1;
+                }
+            }
+            default: {
+                c.illegal = 1;
+            }
+        }
+        return c;
+    }
+
+    /// build the sign-extended immediate for the selected form
+    function immediate (
+        insn   : input logic<32>,
+        sel    : input riscv_pkg::ImmSel  ,
+    ) -> logic<32> {
+        return case sel {
+            riscv_pkg::ImmSel::I: riscv_pkg::sext12(insn[31:20]),
+            riscv_pkg::ImmSel::S: riscv_pkg::sext12({insn[31:25], insn[11:7]}),
+            riscv_pkg::ImmSel::B: riscv_pkg::sext12({insn[31], insn[7], insn[30:25], insn[11:8], 1'b0}),
+            riscv_pkg::ImmSel::U: insn[31:12] << 12,
+            riscv_pkg::ImmSel::J: riscv_pkg::sext12({insn[31], insn[19:12], insn[20], insn[30:21], 1'b0}),
+            default  : 32'h0,
+        };
+    }
+
+    /// branch condition code (only meaningful when ctrl.branch == 1)
+    function branch_op (
+        insn: input logic<32>,
+    ) -> BranchOp {
+        return insn[14:12] as BranchOp;
+    }
+}

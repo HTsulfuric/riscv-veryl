@@ -1,0 +1,51 @@
+/// 32 x 32-bit register file with 2 read ports and 1 write port.
+/// Reads are combinational; the write port is clocked.
+/// Writes to x0 are ignored so x0 stays hard-wired to zero.
+/// RAW hazards are resolved by the write-through lines: when a WB
+/// write is in progress for a register that is being read, the new
+/// value is forwarded instead of the stale stored value.
+/// The write port is only enabled when the WB stage holds a real
+/// write; held pipeline registers never cause double writes.
+module rv32i_regfile (
+    i_clk      : input clock       ,
+    i_rst      : input reset       ,
+    // write port (WB stage)
+    i_we       : input logic       ,
+    i_waddr    : input logic<5>    ,
+    i_wdata    : input logic<32>   ,
+    // read ports (ID stage)
+    i_raddr1   : input logic<5>    ,
+    o_rdata1   : output logic<32>  ,
+    i_raddr2   : input logic<5>    ,
+    o_rdata2   : output logic<32>  ,
+    // write-through control (same-cycle write/read bypass)
+    i_wt_we    : input logic       ,
+    i_wt_addr  : input logic<5>    ,
+    i_wt_data  : input logic<32>   ,
+) {
+    var regfile: logic<32> [32];
+
+    always_ff {
+        if_reset {
+            for i in 0..32 {
+                regfile[i] = 32'h0;
+            }
+        } else if i_we && i_waddr != 0 {
+            regfile[i_waddr] = i_wdata;
+        }
+    }
+
+    always_comb {
+        if i_wt_we && i_wt_addr != 0 && i_wt_addr == i_raddr1 {
+            o_rdata1 = i_wt_data;
+        } else {
+            o_rdata1 = regfile[i_raddr1];
+        }
+
+        if i_wt_we && i_wt_addr != 0 && i_wt_addr == i_raddr2 {
+            o_rdata2 = i_wt_data;
+        } else {
+            o_rdata2 = regfile[i_raddr2];
+        }
+    }
+}

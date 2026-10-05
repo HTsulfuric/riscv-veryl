@@ -1,0 +1,24 @@
+/// Pipeline register between two stages.
+///  * `i_flush` loads an all-zero bubble,
+///  * `i_stall` holds the current contents,
+///  * otherwise the input is captured on the clock edge.
+module rv32i_pipe_reg #(
+    param WIDTH: u32 = 32,
+) (
+    i_clk  : input clock        ,
+    i_rst  : input reset        ,
+    i_flush: input logic         ,
+    i_stall: input logic         ,
+    i_d    : input logic<WIDTH>  ,
+    o_q    : output logic<WIDTH> ,
+) {
+    always_ff {
+        if_reset {
+            o_q = '0;
+        } else if i_flush {
+            o_q = '0;
+        } else if !i_stall {
+            o_q = i_d;
+        }
+    }
+}
