@@ -31,7 +31,7 @@ from Veryl with `veryl test`.
 | `cpu/src/csr.veryl` | minimal M-mode CSRs (mtvec/mscratch/mcause/mepc) |
 | `cpu/src/core.veryl` | pipeline wiring + operand forwarding |
 | `cpu/src/soc.veryl` | core + RAM (sub-word byte lanes, test loader port) |
-| `tests/asm/*.S` | 7 hand-written assembly programs |
+| `tests/asm/*.S` | 8 hand-written assembly programs |
 | `tools/` | golden model + verification flow (Python) |
 | `cpu/src/test/` | unit tests + generated integration tests |
 
@@ -73,7 +73,10 @@ tests/asm/*.S --GNU as/ld--> image --> Python ISS (tools/rvsim.py)
   ISS without touching its own `.text`.
 * `tools/check_spike.py` — the golden ISS must match upstream **Spike**
   commit-for-commit (trap.S compared up to the trap, since Spike stops
-  there).
+  there).  The golden model is not trusted either: the new edge.S
+  cross-check immediately exposed and pinned down a latent sign-extension
+  bug in the Python ISS's LB/LH (zero-extended instead of sign-extended),
+  which the RTL itself had correct all along.
 * `tools/gen_tests.py` — bakes the ISS retire trace + final RAM image of
   each program into a native Veryl test; the SoC under Verilator must
   reproduce both exactly.

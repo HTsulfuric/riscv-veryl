@@ -488,6 +488,303 @@ module test_csr {
     }
 }
 
+/// Auto-generated integration test for tests/asm/edge.S
+/// Golden trace: 52 retired instructions.
+#[allow(unused_variable)]
+#[test(test_edge)]
+module test_edge {
+    inst clk: $tb::clock_gen;
+    #[allow(initial_assign)]
+    var rst: reset;
+
+    var halt: logic;
+    var retire: logic;
+    var rpc: logic<32>;
+    var rrd: logic<5>;
+    var rwdata: logic<32>;
+    #[allow(initial_assign)]
+    var load_en: logic;
+    #[allow(initial_assign)]
+    var load_addr: logic<30>;
+    #[allow(initial_assign)]
+    var load_wdata: logic<32>;
+    #[allow(initial_assign)]
+    var n: logic<32>;
+
+    inst dut: rv32i_soc #(
+        WORDS: 1024,
+    ) (
+        i_clk: clk,
+        i_rst: rst,
+        o_inst_retire: retire,
+        o_retire_pc  : rpc,
+        o_retire_rd  : rrd,
+        o_retire_wdata: rwdata,
+        o_halt       : halt,
+        i_load_en    : load_en,
+        i_load_addr  : load_addr,
+        i_load_wdata : load_wdata,
+    );
+
+    // golden retire trace
+    #[allow(initial_assign)]
+    var gpc: logic<32> [52];
+    #[allow(initial_assign)]
+    var grd: logic<5> [52];
+    #[allow(initial_assign)]
+    var gwd: logic<32> [52];
+    initial {
+        gpc[0] = 32'h00000000; grd[0] = 5'd10; gwd[0] = 32'h000000f8;
+        gpc[1] = 32'h00000004; grd[1] = 5'd1; gwd[1] = 32'h00000011;
+        gpc[2] = 32'h00000008; grd[2] = 5'd0; gwd[2] = 32'h00000000;
+        gpc[3] = 32'h0000000c; grd[3] = 5'd2; gwd[3] = 32'h00000022;
+        gpc[4] = 32'h00000010; grd[4] = 5'd1; gwd[4] = 32'h00000000;
+        gpc[5] = 32'h00000014; grd[5] = 5'd3; gwd[5] = 32'h00000033;
+        gpc[6] = 32'h00000018; grd[6] = 5'd2; gwd[6] = 32'h00000000;
+        gpc[7] = 32'h0000001c; grd[7] = 5'd4; gwd[7] = 32'h00000044;
+        gpc[8] = 32'h00000020; grd[8] = 5'd3; gwd[8] = 32'h00000000;
+        gpc[9] = 32'h00000024; grd[9] = 5'd5; gwd[9] = 32'h44332211;
+        gpc[10] = 32'h00000028; grd[10] = 5'd6; gwd[10] = 32'h00005000;
+        gpc[11] = 32'h0000002c; grd[11] = 5'd6; gwd[11] = 32'h00005566;
+        gpc[12] = 32'h00000030; grd[12] = 5'd4; gwd[12] = 32'h00000000;
+        gpc[13] = 32'h00000034; grd[13] = 5'd7; gwd[13] = 32'h00005566;
+        gpc[14] = 32'h00000038; grd[14] = 5'd8; gwd[14] = 32'h0000f000;
+        gpc[15] = 32'h0000003c; grd[15] = 5'd8; gwd[15] = 32'h0000f0e0;
+        gpc[16] = 32'h00000040; grd[16] = 5'd6; gwd[16] = 32'h00000000;
+        gpc[17] = 32'h00000044; grd[17] = 5'd9; gwd[17] = 32'hfffff0e0;
+        gpc[18] = 32'h00000048; grd[18] = 5'd7; gwd[18] = 32'h0000f0e0;
+        gpc[19] = 32'h0000004c; grd[19] = 5'd1; gwd[19] = 32'h00000007;
+        gpc[20] = 32'h00000050; grd[20] = 5'd2; gwd[20] = 32'h0000000e;
+        gpc[21] = 32'h00000054; grd[21] = 5'd3; gwd[21] = 32'h0000001c;
+        gpc[22] = 32'h00000058; grd[22] = 5'd4; gwd[22] = 32'h00000023;
+        gpc[23] = 32'h0000005c; grd[23] = 5'd8; gwd[23] = 32'h00000000;
+        gpc[24] = 32'h00000060; grd[24] = 5'd11; gwd[24] = 32'h00000007;
+        gpc[25] = 32'h00000064; grd[25] = 5'd12; gwd[25] = 32'h0000000e;
+        gpc[26] = 32'h00000068; grd[26] = 5'd13; gwd[26] = 32'h00000015;
+        gpc[27] = 32'h0000006c; grd[27] = 5'd14; gwd[27] = 32'h00000007;
+        gpc[28] = 32'h00000070; grd[28] = 5'd15; gwd[28] = 32'h00000001;
+        gpc[29] = 32'h00000074; grd[29] = 5'd16; gwd[29] = 32'h00000008;
+        gpc[30] = 32'h00000078; grd[30] = 5'd17; gwd[30] = 32'h00000007;
+        gpc[31] = 32'h0000007c; grd[31] = 5'd18; gwd[31] = 32'h00000002;
+        gpc[32] = 32'h00000080; grd[32] = 5'd19; gwd[32] = 32'h00000003;
+        gpc[33] = 32'h00000084; grd[33] = 5'd20; gwd[33] = 32'h00000009;
+        gpc[34] = 32'h00000088; grd[34] = 5'd1; gwd[34] = 32'h00000003;
+        gpc[35] = 32'h0000008c; grd[35] = 5'd2; gwd[35] = 32'h00000005;
+        gpc[36] = 32'h00000090; grd[36] = 5'd8; gwd[36] = 32'h00000000;
+        gpc[37] = 32'h00000098; grd[37] = 5'd8; gwd[37] = 32'h00000000;
+        gpc[38] = 32'h000000a0; grd[38] = 5'd8; gwd[38] = 32'h00000000;
+        gpc[39] = 32'h000000a8; grd[39] = 5'd8; gwd[39] = 32'h00000000;
+        gpc[40] = 32'h000000b0; grd[40] = 5'd8; gwd[40] = 32'h00000000;
+        gpc[41] = 32'h000000b8; grd[41] = 5'd8; gwd[41] = 32'h00000000;
+        gpc[42] = 32'h000000c0; grd[42] = 5'd21; gwd[42] = 32'h00000007;
+        gpc[43] = 32'h000000c4; grd[43] = 5'd8; gwd[43] = 32'h00000000;
+        gpc[44] = 32'h000000cc; grd[44] = 5'd22; gwd[44] = 32'h000000cc;
+        gpc[45] = 32'h000000d0; grd[45] = 5'd22; gwd[45] = 32'h000000e0;
+        gpc[46] = 32'h000000d4; grd[46] = 5'd22; gwd[46] = 32'h000000e1;
+        gpc[47] = 32'h000000d8; grd[47] = 5'd0; gwd[47] = 32'h000000dc;
+        gpc[48] = 32'h000000e0; grd[48] = 5'd23; gwd[48] = 32'h00000009;
+        gpc[49] = 32'h000000e4; grd[49] = 5'd0; gwd[49] = 32'h0000000a;
+        gpc[50] = 32'h000000e8; grd[50] = 5'd24; gwd[50] = 32'h00000005;
+        gpc[51] = 32'h000000ec; grd[51] = 5'd25; gwd[51] = 32'h00000009;
+    }
+
+#[allow(initial_assign)]
+    var gmem: logic<32> [65];
+#[allow(initial_assign)]
+    var gaddr: logic<30> [65];
+    initial {
+        gmem[0] = 32'h0f800513; gaddr[0] = 30'd0;
+        gmem[1] = 32'h01100093; gaddr[1] = 30'd1;
+        gmem[2] = 32'h00150023; gaddr[2] = 30'd2;
+        gmem[3] = 32'h02200113; gaddr[3] = 30'd3;
+        gmem[4] = 32'h002500a3; gaddr[4] = 30'd4;
+        gmem[5] = 32'h03300193; gaddr[5] = 30'd5;
+        gmem[6] = 32'h00350123; gaddr[6] = 30'd6;
+        gmem[7] = 32'h04400213; gaddr[7] = 30'd7;
+        gmem[8] = 32'h004501a3; gaddr[8] = 30'd8;
+        gmem[9] = 32'h00052283; gaddr[9] = 30'd9;
+        gmem[10] = 32'h00005337; gaddr[10] = 30'd10;
+        gmem[11] = 32'h56630313; gaddr[11] = 30'd11;
+        gmem[12] = 32'h00651223; gaddr[12] = 30'd12;
+        gmem[13] = 32'h00451383; gaddr[13] = 30'd13;
+        gmem[14] = 32'h0000f437; gaddr[14] = 30'd14;
+        gmem[15] = 32'h0e040413; gaddr[15] = 30'd15;
+        gmem[16] = 32'h00851323; gaddr[16] = 30'd16;
+        gmem[17] = 32'h00651483; gaddr[17] = 30'd17;
+        gmem[18] = 32'h00655383; gaddr[18] = 30'd18;
+        gmem[19] = 32'h00700093; gaddr[19] = 30'd19;
+        gmem[20] = 32'h00108133; gaddr[20] = 30'd20;
+        gmem[21] = 32'h002101b3; gaddr[21] = 30'd21;
+        gmem[22] = 32'h00118233; gaddr[22] = 30'd22;
+        gmem[23] = 32'h00152423; gaddr[23] = 30'd23;
+        gmem[24] = 32'h00852583; gaddr[24] = 30'd24;
+        gmem[25] = 32'h00b58633; gaddr[25] = 30'd25;
+        gmem[26] = 32'h00b606b3; gaddr[26] = 30'd26;
+        gmem[27] = 32'h00852703; gaddr[27] = 30'd27;
+        gmem[28] = 32'h00100793; gaddr[28] = 30'd28;
+        gmem[29] = 32'h00f70833; gaddr[29] = 30'd29;
+        gmem[30] = 32'h00852883; gaddr[30] = 30'd30;
+        gmem[31] = 32'h00200913; gaddr[31] = 30'd31;
+        gmem[32] = 32'h00300993; gaddr[32] = 30'd32;
+        gmem[33] = 32'h01288a33; gaddr[33] = 30'd33;
+        gmem[34] = 32'h00300093; gaddr[34] = 30'd34;
+        gmem[35] = 32'h00500113; gaddr[35] = 30'd35;
+        gmem[36] = 32'h00108463; gaddr[36] = 30'd36;
+        gmem[37] = 32'h06f00013; gaddr[37] = 30'd37;
+        gmem[38] = 32'h00209463; gaddr[38] = 30'd38;
+        gmem[39] = 32'h0de00013; gaddr[39] = 30'd39;
+        gmem[40] = 32'h0020c463; gaddr[40] = 30'd40;
+        gmem[41] = 32'h14d00013; gaddr[41] = 30'd41;
+        gmem[42] = 32'h0010d463; gaddr[42] = 30'd42;
+        gmem[43] = 32'h1bc00013; gaddr[43] = 30'd43;
+        gmem[44] = 32'h0020e463; gaddr[44] = 30'd44;
+        gmem[45] = 32'h22b00013; gaddr[45] = 30'd45;
+        gmem[46] = 32'h00117463; gaddr[46] = 30'd46;
+        gmem[47] = 32'h29a00013; gaddr[47] = 30'd47;
+        gmem[48] = 32'h00852a83; gaddr[48] = 30'd48;
+        gmem[49] = 32'h015a8463; gaddr[49] = 30'd49;
+        gmem[50] = 32'h30900013; gaddr[50] = 30'd50;
+        gmem[51] = 32'h00000b17; gaddr[51] = 30'd51;
+        gmem[52] = 32'h014b0b13; gaddr[52] = 30'd52;
+        gmem[53] = 32'h001b6b13; gaddr[53] = 30'd53;
+        gmem[54] = 32'h000b0067; gaddr[54] = 30'd54;
+        gmem[55] = 32'h37800013; gaddr[55] = 30'd55;
+        gmem[56] = 32'h00900b93; gaddr[56] = 30'd56;
+        gmem[57] = 32'h001b8013; gaddr[57] = 30'd57;
+        gmem[58] = 32'h00500c13; gaddr[58] = 30'd58;
+        gmem[59] = 32'h000b8cb3; gaddr[59] = 30'd59;
+        gmem[60] = 32'h00100073; gaddr[60] = 30'd60;
+        gmem[61] = 32'h0000006f; gaddr[61] = 30'd61;
+        gmem[62] = 32'h44332211; gaddr[62] = 30'd62;
+        gmem[63] = 32'hf0e05566; gaddr[63] = 30'd63;
+        gmem[64] = 32'h00000007; gaddr[64] = 30'd64;
+    }
+
+    initial {
+        // hold the core in reset while loading the program
+        // (RAM itself has no reset)
+        rst = 1;
+        load_en = 1;
+        load_addr = 30'd0; load_wdata = 32'h0f800513; clk.next();
+        load_addr = 30'd1; load_wdata = 32'h01100093; clk.next();
+        load_addr = 30'd2; load_wdata = 32'h00150023; clk.next();
+        load_addr = 30'd3; load_wdata = 32'h02200113; clk.next();
+        load_addr = 30'd4; load_wdata = 32'h002500a3; clk.next();
+        load_addr = 30'd5; load_wdata = 32'h03300193; clk.next();
+        load_addr = 30'd6; load_wdata = 32'h00350123; clk.next();
+        load_addr = 30'd7; load_wdata = 32'h04400213; clk.next();
+        load_addr = 30'd8; load_wdata = 32'h004501a3; clk.next();
+        load_addr = 30'd9; load_wdata = 32'h00052283; clk.next();
+        load_addr = 30'd10; load_wdata = 32'h00005337; clk.next();
+        load_addr = 30'd11; load_wdata = 32'h56630313; clk.next();
+        load_addr = 30'd12; load_wdata = 32'h00651223; clk.next();
+        load_addr = 30'd13; load_wdata = 32'h00451383; clk.next();
+        load_addr = 30'd14; load_wdata = 32'h0000f437; clk.next();
+        load_addr = 30'd15; load_wdata = 32'h0e040413; clk.next();
+        load_addr = 30'd16; load_wdata = 32'h00851323; clk.next();
+        load_addr = 30'd17; load_wdata = 32'h00651483; clk.next();
+        load_addr = 30'd18; load_wdata = 32'h00655383; clk.next();
+        load_addr = 30'd19; load_wdata = 32'h00700093; clk.next();
+        load_addr = 30'd20; load_wdata = 32'h00108133; clk.next();
+        load_addr = 30'd21; load_wdata = 32'h002101b3; clk.next();
+        load_addr = 30'd22; load_wdata = 32'h00118233; clk.next();
+        load_addr = 30'd23; load_wdata = 32'h00152423; clk.next();
+        load_addr = 30'd24; load_wdata = 32'h00852583; clk.next();
+        load_addr = 30'd25; load_wdata = 32'h00b58633; clk.next();
+        load_addr = 30'd26; load_wdata = 32'h00b606b3; clk.next();
+        load_addr = 30'd27; load_wdata = 32'h00852703; clk.next();
+        load_addr = 30'd28; load_wdata = 32'h00100793; clk.next();
+        load_addr = 30'd29; load_wdata = 32'h00f70833; clk.next();
+        load_addr = 30'd30; load_wdata = 32'h00852883; clk.next();
+        load_addr = 30'd31; load_wdata = 32'h00200913; clk.next();
+        load_addr = 30'd32; load_wdata = 32'h00300993; clk.next();
+        load_addr = 30'd33; load_wdata = 32'h01288a33; clk.next();
+        load_addr = 30'd34; load_wdata = 32'h00300093; clk.next();
+        load_addr = 30'd35; load_wdata = 32'h00500113; clk.next();
+        load_addr = 30'd36; load_wdata = 32'h00108463; clk.next();
+        load_addr = 30'd37; load_wdata = 32'h06f00013; clk.next();
+        load_addr = 30'd38; load_wdata = 32'h00209463; clk.next();
+        load_addr = 30'd39; load_wdata = 32'h0de00013; clk.next();
+        load_addr = 30'd40; load_wdata = 32'h0020c463; clk.next();
+        load_addr = 30'd41; load_wdata = 32'h14d00013; clk.next();
+        load_addr = 30'd42; load_wdata = 32'h0010d463; clk.next();
+        load_addr = 30'd43; load_wdata = 32'h1bc00013; clk.next();
+        load_addr = 30'd44; load_wdata = 32'h0020e463; clk.next();
+        load_addr = 30'd45; load_wdata = 32'h22b00013; clk.next();
+        load_addr = 30'd46; load_wdata = 32'h00117463; clk.next();
+        load_addr = 30'd47; load_wdata = 32'h29a00013; clk.next();
+        load_addr = 30'd48; load_wdata = 32'h00852a83; clk.next();
+        load_addr = 30'd49; load_wdata = 32'h015a8463; clk.next();
+        load_addr = 30'd50; load_wdata = 32'h30900013; clk.next();
+        load_addr = 30'd51; load_wdata = 32'h00000b17; clk.next();
+        load_addr = 30'd52; load_wdata = 32'h014b0b13; clk.next();
+        load_addr = 30'd53; load_wdata = 32'h001b6b13; clk.next();
+        load_addr = 30'd54; load_wdata = 32'h000b0067; clk.next();
+        load_addr = 30'd55; load_wdata = 32'h37800013; clk.next();
+        load_addr = 30'd56; load_wdata = 32'h00900b93; clk.next();
+        load_addr = 30'd57; load_wdata = 32'h001b8013; clk.next();
+        load_addr = 30'd58; load_wdata = 32'h00500c13; clk.next();
+        load_addr = 30'd59; load_wdata = 32'h000b8cb3; clk.next();
+        load_addr = 30'd60; load_wdata = 32'h00100073; clk.next();
+        load_addr = 30'd61; load_wdata = 32'h0000006f; clk.next();
+        load_addr = 30'd62; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd63; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd64; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd65; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd66; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd67; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd68; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd69; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd70; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd71; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd72; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd73; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd74; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd75; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd76; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd77; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd78; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd79; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd80; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd81; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd82; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd83; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd84; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd85; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd86; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd87; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd88; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd89; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd90; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd91; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd92; load_wdata = 32'h00000000; clk.next();
+        load_addr = 30'd93; load_wdata = 32'h00000000; clk.next();
+        load_en = 0;
+        rst = 0;
+        // run and check trace
+        n = 0;
+        for cyc in 0..4000 {
+            clk.next();
+            if retire && n <= 52 - 1 {
+                $assert(rpc == gpc[n], "pc mismatch at %d: %h != %h", n, rpc, gpc[n]);
+                $assert(rrd == grd[n], "rd mismatch at %d: %d != %d", n, rrd, grd[n]);
+                if grd[n] != 0 {
+                    $assert(rwdata == gwd[n], "wdata mismatch at %d pc=%h: %h != %h", n, rpc, rwdata, gwd[n]);
+                }
+                n += 1;
+            }
+            if halt {
+                break;
+            }
+        }
+        $assert(n == 52, "retired %d instructions, expected %d", n, 52);
+        for i in 0..65 {
+            $assert(dut.mem[gaddr[i]] == gmem[i], "mem[%d] mismatch: %h != %h", gaddr[i], dut.mem[gaddr[i]], gmem[i]);
+        }
+        $finish();
+    }
+}
+
 /// Auto-generated integration test for tests/asm/jump.S
 /// Golden trace: 62 retired instructions.
 #[allow(unused_variable)]

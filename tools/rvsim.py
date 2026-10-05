@@ -112,8 +112,8 @@ class ISS:
                 nxt = (pc + imm_b) & MASK
         elif op == 0x03: # LOAD
             addr = (a + imm_i) & MASK
-            if f3 == 0: wval = s32(self.rmem(addr, 1)) & MASK
-            elif f3 == 1: wval = s32(self.rmem(addr, 2)) & MASK
+            if f3 == 0: wval = sext(self.rmem(addr, 1), 8) & MASK
+            elif f3 == 1: wval = sext(self.rmem(addr, 2), 16) & MASK
             elif f3 == 2:
                 if addr & 3: return self.trap(2)
                 wval = self.rmem(addr, 4)
